@@ -1,0 +1,159 @@
+name: QBZ Downloader - Build PortableApps ZIP and Installer
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_version:
+        description: 'latest stable tag, or exact stable version (e.g. 5.6.3). Explicit SHA mode requires an exact version.'
+        required: true
+        default: latest
+        type: string
+      upstream_commit:
+        description: 'Optional 40-character upstream commit SHA. Explicit opt-in when upstream has no suitable stable tags. Never automatically builds main.'
+        required: false
+        default: ''
+        type: string
+      allow_unreleased_snapshot:
+        description: 'Opt in ONLY when upstream has no stable tags. Resolve and pin current upstream HEAD; this is NOT an official stable release.'
+        required: true
+        default: false
+        type: boolean
+      publish:
+        description: 'Publish validated release to this builder repository'
+        required: true
+        default: true
+        type: boolean
+permissions:
+  contents: write
+concurrency:
+  group: qbz-portableapps-publish
+  cancel-in-progress: false
+jobs:
+  portableapps:
+    runs-on: windows-latest
+    timeout-minutes: 100
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+      GIT_TERMINAL_PROMPT: '0'
+    steps:
+      - name: Checkout separate builder repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python for source verification and package checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Locked Node.js build environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Self-test kit without application runtime
+        run: |
+          python scripts/check_kit.py
+          if ($LASTEXITCODE -ne 0) { throw 'Kit static validation failed' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Kit regression tests failed' }
+      - name: Verify and select upstream source (never implicit main)
+        id: source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REQUEST_VERSION: ${{ inputs.upstream_version }}
+          REQUEST_SHA: ${{ inputs.upstream_commit }}
+          ALLOW_SNAPSHOT: ${{ inputs.allow_unreleased_snapshot }}
+        run: |
+          $flags = @()
+          if ($env:ALLOW_SNAPSHOT -eq 'true') { $flags += '--allow-untagged-head' }
+          python scripts/resolve_upstream.py --version "$env:REQUEST_VERSION" --commit "$env:REQUEST_SHA" @flags
+          if ($LASTEXITCODE -ne 0) { throw 'Source resolution failed' }
+      - name: Apply fail-closed QBZ Electron portability adapter
+        run: |
+          python scripts/patch_upstream.py work/upstream
+          if ($LASTEXITCODE -ne 0) { throw 'Portable source patch failed' }
+      - name: Compile actual Electron application and required media helpers
+        timeout-minutes: 55
+        run: |
+          python scripts/build_application.py
+          if ($LASTEXITCODE -ne 0) { throw 'Upstream Electron build failed' }
+      - name: Compile genuine Windows root launcher from C++ source
+        run: ./scripts/build_launcher.ps1
+      - name: Stage app and upstream attribution
+        run: |
+          python scripts/prepare_stage.py
+          if ($LASTEXITCODE -ne 0) { throw 'PortableApps stage preparation failed' }
+          ./scripts/create_icons.ps1
+          python scripts/thirdparty_notices.py
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency license notice collection failed' }
+      - name: Static validation of stage and application executables
+        run: |
+          python scripts/validate_package.py --stage work/stage/QBZDownloaderPortable
+          if ($LASTEXITCODE -ne 0) { throw 'Static stage checks failed' }
+      - name: Generate and independently validate portable ZIP
+        id: zip
+        run: |
+          python scripts/make_zip.py
+          if ($LASTEXITCODE -ne 0) { throw 'ZIP generation failed' }
+          $zipFiles = @(Get-ChildItem 'out/release' -Filter '*.zip')
+          if ($zipFiles.Count -ne 1) { throw 'Expected exactly one PortableApps ZIP' }
+          python scripts/validate_package.py --zip $zipFiles[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'ZIP validation failed' }
+      - name: Build separate community NSIS installer (PINNED shared action)
+        if: steps.zip.outcome == 'success'
+        id: installer
+        continue-on-error: true
+        uses: vhick/Portable-Package-Builder@v1.0.0
+        with:
+          source-dir: work/stage/QBZDownloaderPortable
+          output-dir: out/installer-work
+          engine: custom-nsis
+          running-exe: 'App\QBZDownloader\QBZ Downloader.exe'
+          timeout-seconds: '900'
+          package-revision: r1
+      - name: Independently inspect installer PE and publish only if valid
+        if: steps.installer.outcome == 'success'
+        id: installer_validation
+        run: |
+          $target = '${{ steps.installer.outputs.installer-file }}'
+          if ([string]::IsNullOrWhiteSpace($target)) { throw 'Missing installer-file output from shared action' }
+          python scripts/validate_installer.py $target --publish-dir out/release
+          if ($LASTEXITCODE -ne 0) { throw 'Installer static validation failed' }
+      - name: Set unique immutable-looking release identity for the actual output set
+        id: release
+        if: steps.zip.outcome == 'success'
+        env:
+          SOURCE_RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+          INSTALLER_STATUS: ${{ steps.installer.outcome }}
+          INSTALLER_CHECK: ${{ steps.installer_validation.outcome }}
+        run: |
+          $tag = $env:SOURCE_RELEASE_TAG
+          if (($env:INSTALLER_STATUS -ne 'success') -or ($env:INSTALLER_CHECK -ne 'success')) { $tag += '-zip-only' }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Selected release identity: $tag"
+      - name: Shared publisher dry-run — validates eligible finished files only
+        if: steps.release.outcome == 'success'
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: out/release/*.zip;out/release/*.paf.exe
+          tag: ${{ steps.release.outputs.tag }}
+          release-title: QBZ Downloader PortableApps ${{ steps.source.outputs.version }} source ${{ steps.source.outputs.commit }}
+          tag-prefix: portable-qbz-
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+      - name: Publish only validated assets (ZIP survives installer failure)
+        if: steps.release.outcome == 'success' && inputs.publish == true
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: out/release/*.zip;out/release/*.paf.exe
+          tag: ${{ steps.release.outputs.tag }}
+          release-title: QBZ Downloader PortableApps ${{ steps.source.outputs.version }} source ${{ steps.source.outputs.commit }}
+          tag-prefix: portable-qbz-
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'
+      - name: Report real installer failure instead of treating ZIP publication as complete success
+        if: steps.zip.outcome == 'success' && (steps.installer.outcome != 'success' || steps.installer_validation.outcome != 'success')
+        run: throw 'ZIP was validated; installer failed or could not be validated. Only ZIP is eligible for release. Check installer logs.'

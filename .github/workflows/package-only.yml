@@ -1,0 +1,96 @@
+name: QBZ Downloader - Package Installer from Validated Release ZIP
+on:
+  workflow_dispatch:
+    inputs:
+      source_release_tag:
+        description: 'Existing publisher-managed release tag in THIS builder repository, containing the validated QBZ ZIP'
+        required: true
+        type: string
+      publish:
+        description: 'Publish a new ZIP+installer package-only release'
+        required: true
+        default: true
+        type: boolean
+permissions:
+  contents: write
+concurrency:
+  group: qbz-portableapps-publish
+  cancel-in-progress: false
+jobs:
+  package-only:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      GH_TOKEN: ${{ github.token }}
+      REQUEST_TAG: ${{ inputs.source_release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check kit and release ownership before trusting archive
+        run: |
+          python scripts/check_kit.py
+          if ($LASTEXITCODE -ne 0) { throw 'Kit checks failed' }
+          if ($env:REQUEST_TAG -notmatch '^portable-qbz-[A-Za-z0-9._-]+$') { throw 'Only QBZ builder release tags are accepted' }
+          $body = & gh release view $env:REQUEST_TAG --repo $env:GITHUB_REPOSITORY --json body --jq .body
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot look up release' }
+          if ($body -notmatch 'portable-release-publisher:managed:v2') { throw 'Refusing a non-publisher-managed release' }
+      - name: Download only selected trusted release ZIP and publisher checksum file
+        run: |
+          New-Item -ItemType Directory -Path work/incoming -Force | Out-Null
+          & gh release download $env:REQUEST_TAG --repo $env:GITHUB_REPOSITORY --pattern 'QBZDownloaderPortable-*.zip' --pattern 'SHA256SUMS.txt' --dir work/incoming
+          if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+      - name: Verify checksum, safe layout, provenance; extract without rebuilding upstream
+        run: |
+          python scripts/verify_release_zip.py
+          if ($LASTEXITCODE -ne 0) { throw 'Release ZIP failed verification' }
+      - name: Generate installer using pinned shared Package Builder
+        id: installer
+        uses: vhick/Portable-Package-Builder@v1.0.0
+        with:
+          source-dir: work/stage/QBZDownloaderPortable
+          output-dir: out/installer-work
+          engine: custom-nsis
+          running-exe: 'App\QBZDownloader\QBZ Downloader.exe'
+          timeout-seconds: '900'
+          package-revision: r1
+      - name: Verify installer before release
+        run: |
+          $file = '${{ steps.installer.outputs.installer-file }}'
+          if (-not $file) { throw 'Shared installer did not provide its output file' }
+          python scripts/validate_installer.py $file --publish-dir out/release
+          if ($LASTEXITCODE -ne 0) { throw 'Installer verification failed' }
+      - name: Derive package-only tag from verified embedded upstream identity
+        id: release
+        run: |
+          $tag = [IO.File]::ReadAllText('work/pack_identity.txt').Trim()
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Publisher dry-run
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: out/release/*.zip;out/release/*.paf.exe
+          tag: ${{ steps.release.outputs.tag }}
+          tag-prefix: portable-qbz-
+          release-title: QBZ Downloader PortableApps packaging-only verified ZIP
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+      - name: Publish tested release assets
+        if: inputs.publish == true
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: out/release/*.zip;out/release/*.paf.exe
+          tag: ${{ steps.release.outputs.tag }}
+          tag-prefix: portable-qbz-
+          release-title: QBZ Downloader PortableApps packaging-only verified ZIP
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'

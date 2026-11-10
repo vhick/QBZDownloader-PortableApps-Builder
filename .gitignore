@@ -1,0 +1,8 @@
+/work/
+/out/
+/node_modules/
+*.log
+*.paf.exe
+*.zip
+__pycache__/
+*.pyc
