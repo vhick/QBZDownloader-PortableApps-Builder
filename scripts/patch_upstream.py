@@ -3,8 +3,8 @@
 import argparse
 from pathlib import Path
 
-MARKER = '// QBZ-PORTABLEAPPS-BUILDER-b1r2'
-PROLOGUE = r'''// QBZ-PORTABLEAPPS-BUILDER-b1r2: opt-in from compiled root launcher only.
+MARKER = '// QBZ-PORTABLEAPPS-BUILDER-b1r3'
+PROLOGUE = r'''// QBZ-PORTABLEAPPS-BUILDER-b1r3: opt-in from compiled root launcher only.
 const qbzPortableRoot = process.env.QBZ_PORTABLE_DATA_ROOT || '';
 if (qbzPortableRoot) {
   // Do not inherit an installed-app migration directive or external environment download override.

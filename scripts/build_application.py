@@ -5,6 +5,7 @@ import json
 import shutil
 import struct
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -13,9 +14,36 @@ def run(*argv,cwd=None):
     print('RUN:', ' '.join(argv),flush=True)
     subprocess.run(argv,cwd=cwd,check=True,env={**os.environ,'PYTHONIOENCODING':'utf-8'})
 
+def sqlite_native_layout(module_root):
+    """Resolve the binary used by the actual version's JS loader.
+
+    better-sqlite3 v13+ prefers its Node-API prebuilds/win32-x64.node;
+    v12 and older use build/Release/better_sqlite3.node. Never validate
+    a legacy .node when the active loader will prefer a different prebuild.
+    """
+    module_root = Path(module_root)
+    manifest = module_root/'package.json'
+    if not manifest.is_file():
+        raise RuntimeError('Missing SQLite package.json: '+str(manifest))
+    pkg = json.loads(manifest.read_text(encoding='utf-8'))
+    if pkg.get('name') != 'better-sqlite3':
+        raise RuntimeError('Unexpected SQLite module identity')
+    version = pkg.get('version', '')
+    match = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?',version)
+    if not match:
+        raise RuntimeError('Cannot determine better-sqlite3 version: '+repr(version))
+    if int(match.group(1)) >= 13:
+        rel = 'prebuilds/win32-x64.node'
+        if not (module_root/'lib/binding.js').is_file():
+            raise RuntimeError('v13+ SQLite binding.js missing; cannot verify loader contract')
+    else:
+        rel = 'build/Release/better_sqlite3.node'
+    return rel, version
+
+
 def native_addon_path(module_root):
-    """Pin the conventional better-sqlite3 binary path; fail if upstream changes it."""
-    return Path(module_root) / 'build/Release/better_sqlite3.node'
+    rel, _ = sqlite_native_layout(module_root)
+    return Path(module_root)/rel
 
 
 def inspect_pe_x64(path):
@@ -40,36 +68,56 @@ def sha256_file(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
-def ensure_packaged_sqlite(src, packaged):
-    """Deploy the actual Electron-ABI-rebuilt module into unpacked app resources.
+def snapshot_sqlite_module(src, destination):
+    """Capture the source-verified module BEFORE electron-builder can prune it."""
+    module = Path(src)/'node_modules/better-sqlite3'
+    path = native_addon_path(module)
+    inspect_pe_x64(path)
+    for name in ['package.json','lib/index.js','lib/database.js']:
+        if not (module/name).is_file():
+            raise RuntimeError('Incomplete source SQLite module: '+name)
+    destination = Path(destination)
+    if destination.exists():
+        raise RuntimeError('Existing SQLite snapshot; refusing to mix builds: '+str(destination))
+    shutil.copytree(module, destination, symlinks=True)
+    native = native_addon_path(destination)
+    inspect_pe_x64(native)
+    if sha256_file(native) != sha256_file(path):
+        raise RuntimeError('SQLite source snapshot checksum mismatch')
+    rel, version = sqlite_native_layout(destination)
+    print('SQLITE SOURCE SNAPSHOT:', version, rel, sha256_file(native),flush=True)
+    return destination
 
-    electron-builder's dependency inclusion can exclude the rebuilt .node while
-    reporting success. ASAR-disabled packaging lets us verify and repair the
-    precise runtime module tree without mutating the ASAR integrity manifest.
+
+def ensure_packaged_sqlite(source_module, packaged):
+    """Restore only the verified module if Electron omitted the active loader binary.
+
+    `source_module` is the read-only snapshot made immediately after the
+    upstream rebuild step; do NOT read mutable upstream node_modules after
+    packaging. Never silently replace a different packaged native binary.
     """
-    src = Path(src)
-    packaged = Path(packaged)
-    source_module = src/'node_modules/better-sqlite3'
-    target_module = packaged/'resources/app/node_modules/better-sqlite3'
-    source_native = native_addon_path(source_module)
-    target_native = native_addon_path(target_module)
+    source_module=Path(source_module)
+    packaged=Path(packaged)
+    target_module=packaged/'resources/app/node_modules/better-sqlite3'
+    rel, expected = sqlite_native_layout(source_module)
+    source_native=source_module/rel
+    target_native=target_module/rel
     inspect_pe_x64(source_native)
-    for filename in ['package.json', 'lib/database.js']:
-        if not (source_module/filename).is_file():
-            raise RuntimeError('Source native addon JavaScript module missing: '+filename)
-    if not (target_native).is_file():
-        print('PACKAGING REPAIR: electron-builder omitted rebuilt better-sqlite3 native addon; '
-              'copying ONLY source-locked better-sqlite3 module to unpacked resources/app', flush=True)
-        shutil.copytree(source_module, target_module, dirs_exist_ok=True)
+    if not target_native.is_file():
+        print('PACKAGING REPAIR: SQLite active native addon missing from packaged Electron; '
+              'copying only verified snapshot module tree',flush=True)
+        shutil.copytree(source_module,target_module,dirs_exist_ok=True,symlinks=True)
     inspect_pe_x64(target_native)
-    if sha256_file(source_native) != sha256_file(target_native):
-        raise RuntimeError('Packaged native addon differs from verified Electron-ABI rebuilt module')
-    if not (target_module/'package.json').is_file() or not (target_module/'lib/database.js').is_file():
-        raise RuntimeError('Packaged SQLite JavaScript loader missing')
-    expected = json.loads((source_module/'package.json').read_text(encoding='utf-8'))['version']
-    actual = json.loads((target_module/'package.json').read_text(encoding='utf-8'))['version']
-    if expected != actual:
-        raise RuntimeError(f'SQLite module version mismatch: {expected} != {actual}')
+    if sha256_file(source_native)!=sha256_file(target_native):
+        raise RuntimeError('Packaged SQLite native binary differs from verified source snapshot')
+    actual_rel, actual=sqlite_native_layout(target_module)
+    if rel!=actual_rel or expected!=actual:
+        raise RuntimeError(f'Packaged SQLite loader/version mismatch: {expected}/{rel} != {actual}/{actual_rel}')
+    for name in ['package.json','lib/index.js','lib/database.js']:
+        if not (target_module/name).is_file():
+            raise RuntimeError('Missing packaged SQLite loader file: '+name)
+    if int(expected.split('.')[0])>=13 and not (target_module/'lib/binding.js').is_file():
+        raise RuntimeError('Packaged SQLite v13 binding.js missing')
     print('PACKAGED SQLITE VERIFIED:',target_native,'version',actual,
           'SHA256',sha256_file(target_native),flush=True)
     return target_native
@@ -106,6 +154,7 @@ def main():
     run('npm.cmd','ci','--no-audit','--no-fund',cwd=src)
     run('npm.cmd','run','build:full',cwd=src)
     run('npm.cmd','run','desktop:rebuild',cwd=src)
+    sqlite_snapshot=snapshot_sqlite_module(src,Path('work/verified-sqlite-module'))
     run('npm.cmd','run','bundle-binaries',cwd=src)
     for binary in ['ffmpeg.exe','fpcalc.exe']:
         p=src/'bin/win32-x64'/binary
@@ -132,11 +181,12 @@ def main():
     run('npx.cmd','--no-install','electron-builder','--win','--x64','--dir','--config',str(config_path),cwd=src)
     produced=src/'portable-unpacked/win-unpacked/QBZ Downloader.exe'
     if not produced.is_file(): raise RuntimeError('Expected unpacked QBZ Downloader.exe missing')
-    native_addon=ensure_packaged_sqlite(src, produced.parent)
+    native_addon=ensure_packaged_sqlite(sqlite_snapshot, produced.parent)
     smoke_sqlite_under_packaged_electron(produced.parent)
     electron_version=json.loads((src/'node_modules/electron/package.json').read_text(encoding='utf-8'))['version']
     addon_identity={'module':'better-sqlite3','electron_version':electron_version,
-                    'native_path':'resources/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+                    'native_path':native_addon.relative_to(produced.parent).as_posix(),
+                    'module_version':sqlite_native_layout(sqlite_snapshot)[1],
                     'native_sha256':sha256_file(native_addon),
                     'verification':'headless Electron require + in-memory SQLite SELECT 7'}
     Path('work/native-addon-identity.json').write_text(

@@ -1,4 +1,4 @@
-# QBZ Downloader b1r2 — source and portability findings
+# QBZ Downloader b1r3 — source and portability findings
 
 **Audit date:** 2026-11-10. **Resolved architecture:** PORTABLEAPPS (on-demand Electron downloader with local web dashboard/backend, Windows x64). **Selected deliverable:** ZIP + independently generated community NSIS installer. NATIVE not requested and not built.
 
@@ -81,9 +81,15 @@ Launcher source: `launcher/main.cpp` and `launcher/CMakeLists.txt`. Windows PE c
 | Publisher release creation | **NOT YET VERIFIED** | User must run GitHub workflow |
 | User-reported Windows functionality | **NOT YET VERIFIED** | No user confirmation at this revision |
 
-## b1r2 observed CI feedback and corrective design
+## b1r3 observed CI feedback and corrective design
 
 - **WINDOWS-COMPILED (b1r1 log 115928022622):** Electron 44.10.0 app was created, upstream `desktop:rebuild` reported success for better-sqlite3, and the compiled C++ root launcher succeeded using Visual Studio 2026.
 - **FAILED (b1r1):** staging validation required one `better_sqlite3.node` under `app.asar.unpacked`; it found a count other than one. The uploaded logs did not show the packaged directory contents, so it is not proven whether the native binary was missing or stored elsewhere.
-- **b1r2 fix (static design, not yet Windows tested):** use source-built `asar: false` (supported by electron-builder v26), verify the rebuilt x64 native module and source version, restore this exact locked source module into `resources/app/node_modules/better-sqlite3` if omitted from the packaged tree, reject hash mismatches, and require a headless Electron SQLite query before staging. This is a packaging-only remedy and performs no host-data harvesting.
+- **b1r3 fix (static design, not yet Windows tested):** use source-built `asar: false` (supported by electron-builder v26), verify the rebuilt x64 native module and source version, restore this exact locked source module into `resources/app/node_modules/better-sqlite3` if omitted from the packaged tree, reject hash mismatches, and require a headless Electron SQLite query before staging. This is a packaging-only remedy and performs no host-data harvesting.
 - **GUI/manual acceptance remains pending:** Native module smoke tests do not validate the dashboard, notification activation, Qobuz login, download queue, or installed-app coexistence.
+
+## b1r3 CI finding (log `115934299115`)
+
+- **WINDOWS-COMPILED (b1r2):** npm source dependency install, backend/React build, native rebuild command, Electron 44.10.0 packaging successfully completed. The build stopped before root launcher compilation and ZIP validation.
+- **FAILED (b1r2):** hard-coded `node_modules/better-sqlite3/build/Release/better_sqlite3.node` absent. The lockfile-selected better-sqlite3 v13.x ships `prebuilds/win32-x64.node`; the upstream binding loader prefers it over legacy build/Release.
+- **b1r3 design (STATIC-VALIDATED):** select the actual version-specific JS-loader path, snapshot/validate source addon before packaging, compare target SHA-256, then run packaged Electron SQLite in-memory query. No broad cleanup or unrelated system changes. Windows b1r3 build still requires verification.

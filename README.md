@@ -1,4 +1,4 @@
-# QBZ Downloader — Windows PortableApps Builder Kit b1r2
+# QBZ Downloader — Windows PortableApps Builder Kit b1r3
 
 **Mode: PORTABLEAPPS only.** This is an independent, unofficial builder for [ifauzeee/QBZ-Downloader](https://github.com/ifauzeee/QBZ-Downloader). It creates a source-built Windows x64 Electron application, a genuine compiled C++ root `QBZDownloaderPortable.exe`, a ready-to-extract PortableApps ZIP, and a separate community NSIS `.paf.exe` installer built through the pinned shared action. **No installation is required to run the ZIP.** This kit is **not** a PortableApps.com-certified package.
 
@@ -9,7 +9,7 @@
 1. Sign in at [github.com](https://github.com). Select **New repository**. Use a new name such as `QBZDownloader-PortableApps-Builder`. **Do not fork QBZ-Downloader.** Choose **Private** if you want your generated releases restricted to your account; choose Public only if you intend public distribution and license obligations are met. Create the empty repository.
 2. In **GitHub Desktop**, select **File > Clone Repository**, choose your new repository, and clone it to a local folder.
 3. Extract every file from this builder-kit ZIP into the clone root, including the **`.github`** folder. It must look like `.github/workflows/build.yml`, `scripts/resolve_upstream.py`, `launcher/main.cpp`, and `README.md`.
-4. In GitHub Desktop, review changed files, enter a summary such as `Add QBZ Downloader PortableApps builder b1r2`, and click **Commit to main** then **Push origin**. No manual Git initialization or upstream fork required.
+4. In GitHub Desktop, review changed files, enter a summary such as `Add QBZ Downloader PortableApps builder b1r3`, and click **Commit to main** then **Push origin**. No manual Git initialization or upstream fork required.
 5. On the repository's GitHub website, select **Actions**. Enable actions when prompted. Select **QBZ Downloader - Build PortableApps ZIP and Installer**, then **Run workflow**.
 6. Leave `upstream_version=latest` and `upstream_commit` empty for a tagged stable release. **Important:** the public upstream Releases page currently lists no downloadable releases, and a corresponding stable tag has not been confirmed. If the log says `NO STABLE UPSTREAM TAGS FOUND`, re-run with **allow_unreleased_snapshot=true**. This is a deliberate opt-in to a specifically recorded upstream commit, **not** a verified official stable release. Or provide an independently verified 40-character upstream SHA together with its matching package version. Never use a random SHA.
 7. Leave `publish=true` to create release assets in **your builder repository**. The job obtains code, builds QBZ, prepares portable folders, compiles the launcher, tests the layout, creates the ZIP, invokes the pinned installer builder, and publishes through the pinned publisher. It does not need a Windows desktop session, local Node.js, manual downloads, elevation, or a personal access token.
@@ -21,9 +21,9 @@
 
 Expected naming is based on the actual source version and first 12 source-SHA characters, not the shared publisher version:
 
-- ZIP: `QBZDownloaderPortable-<upstream-version>-<source-sha12>-b1r2.zip`
-- Community installer: `QBZDownloaderPortable_<package-version-four-components>_custom-nsis-r2.paf.exe` (final name is supplied by the pinned package-builder action).
-- Release tag: `portable-qbz-v<version>-<sha12>-b1r2`; a ZIP-only release from a failed installer ends in `-zip-only`.
+- ZIP: `QBZDownloaderPortable-<upstream-version>-<source-sha12>-b1r3.zip`
+- Community installer: `QBZDownloaderPortable_<package-version-four-components>_custom-nsis-r3.paf.exe` (final name is supplied by the pinned package-builder action).
+- Release tag: `portable-qbz-v<version>-<sha12>-b1r3`; a ZIP-only release from a failed installer ends in `-zip-only`.
 - ZIP contains `Other/Source/build-identity.json`, the upstream version, exact commit, lockfile SHA-256 values, builder revision, source provenance and retained upstream MIT license.
 - Shared publisher creates `SHA256SUMS.txt` in the release automatically. It publishes only validated `.zip` and `.paf.exe` assets. Default pruning is **off**.
 
@@ -43,7 +43,7 @@ QBZDownloaderPortable/
       resources/
         app/                         <-- unpacked JavaScript/runtime modules
           node_modules/better-sqlite3/
-            build/Release/better_sqlite3.node
+            prebuilds/win32-x64.node  <-- better-sqlite3 v13.x; older versions use build/Release
         bin/win32-x64/ffmpeg.exe
         bin/win32-x64/fpcalc.exe
       ... other required Electron runtime files
@@ -81,7 +81,7 @@ A successful ZIP validation can be followed by a failed installer action. In tha
 1. Select **QBZ Downloader - Package Installer from Validated Release ZIP** in Actions.
 2. Enter the exact earlier `portable-qbz-...-zip-only` release tag.
 3. This workflow verifies the release's publisher-managed marker and published checksum, safely extracts the previously validated ZIP, and runs only the pinned shared installer action.
-4. On success, it publishes the verified ZIP and new `.paf.exe` under a `...-pack-r2` tag. No upstream recompilation is performed.
+4. On success, it publishes the verified ZIP and new `.paf.exe` under a `...-pack-r3` tag. No upstream recompilation is performed.
 
 ## Verified integration boundaries
 
@@ -95,3 +95,15 @@ A successful ZIP validation can be followed by a failed installer action. In tha
 Upstream source is MIT licensed at the inspected repository state. Third-party Electron, native binaries, and npm dependencies retain their own license obligations; read `docs/AUDIT.md` and the licenses supplied with application assets. No official PortableApps, Qobuz, or upstream developer endorsement is claimed. Use with a valid authorized account and comply with content-service terms and local law; the kit does not provide credentials or bypass content protection.
 
 See `docs/AUDIT.md`, `docs/WINDOWS-ACCEPTANCE.md`, and `docs/TROUBLESHOOTING.md` for the full findings, honest validation status, tests, and recovery procedures.
+
+## b1r3 fix (uploaded CI log `115934299115`)
+
+The b1r2 build compiled React, TypeScript and packaged Electron but failed on a
+now-obsolete hardcoded SQLite native addon location. `better-sqlite3` v13.0.3
+ships `prebuilds/win32-x64.node` and its `lib/binding.js` prefers this path.
+The b1r3 builder dynamically validates this v13+ loader layout, retains a
+checksum-verified module snapshot **before** electron-builder, restores only
+that module if the packager omits it, and tests a real SQLite query using the
+packaged Electron runtime before publishing. Older SQLite module versions
+retain the `build/Release/` path. Changes have been locally regression-tested,
+not Windows-compiled in this environment.

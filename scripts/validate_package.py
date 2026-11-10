@@ -8,6 +8,7 @@ from pathlib import Path
 import struct
 import sys
 import zipfile
+from build_application import sqlite_native_layout
 
 ROOT='QBZDownloaderPortable'
 
@@ -34,10 +35,12 @@ def validate_stage(path):
     if any((root/'Data').rglob('*')): raise ValueError('Release stage must not contain a previous user profile')
     pe_info(paths[0]);pe_info(paths[1]);pe_info(paths[7]);pe_info(paths[8])
     app_root=root/'App/QBZDownloader/resources/app'
-    sqlite_native=app_root/'node_modules/better-sqlite3/build/Release/better_sqlite3.node'
-    sqlite_loader=app_root/'node_modules/better-sqlite3/lib/database.js'
-    if not sqlite_native.is_file() or not sqlite_loader.is_file():
-        raise ValueError('Missing unpacked better-sqlite3 native module or JS loader in resources/app/node_modules')
+    module_root=app_root/'node_modules/better-sqlite3'
+    rel,version=sqlite_native_layout(module_root)
+    sqlite_native=module_root/rel
+    if not (module_root/'lib/database.js').is_file() or not (module_root/'lib/index.js').is_file():
+        raise ValueError('Missing unpacked SQLite JavaScript loader in resources/app/node_modules')
+    if not sqlite_native.is_file(): raise ValueError('Missing SQLite binary used by version-specific loader: '+str(sqlite_native))
     pe_info(sqlite_native)
     if sqlite_native.stat().st_size < 10000: raise ValueError('SQLite native module too small')
     addon_report=root/'Other/Source/native-addon-identity.json'
@@ -45,11 +48,13 @@ def validate_stage(path):
     addon=json.loads(addon_report.read_text(encoding='utf-8'))
     with sqlite_native.open('rb') as source:
         addon_hash=hashlib.file_digest(source,'sha256').hexdigest()
-    if addon.get('native_sha256')!=addon_hash: raise ValueError('Packaged SQLite module hash differs from verified Electron probe identity')
-    if addon.get('native_path')!='resources/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node':
-        raise ValueError('Unexpected native module identity path')
+    if addon.get('native_sha256')!=addon_hash:
+        raise ValueError('Packaged SQLite module hash differs from verified Electron probe identity')
+    expected_path='resources/app/node_modules/better-sqlite3/'+rel
+    if addon.get('native_path')!=expected_path or addon.get('module_version')!=version:
+        raise ValueError('Packaged SQLite loader path/version differs from recorded native-addon identity')
     if (root/'App/QBZDownloader/resources/app.asar').exists():
-        raise ValueError('b1r2 expects verified unpacked Electron resources, not an ASAR archive')
+        raise ValueError('b1r3 expects verified unpacked Electron resources, not an ASAR archive')
     if paths[3].read_bytes()[:4]!=b'\x00\x00\x01\x00': raise ValueError('Invalid ICO')
     for icon in paths[4:6]:
         if icon.read_bytes()[:8]!=b'\x89PNG\r\n\x1a\n': raise ValueError('Invalid PNG '+str(icon))

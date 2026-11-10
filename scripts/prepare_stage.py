@@ -47,7 +47,7 @@ CommercialUse=true
 
 [Version]
 PackageVersion={package_version}
-DisplayVersion={v} Portable b1r2
+DisplayVersion={v} Portable b1r3
 
 [Control]
 Icons=1
