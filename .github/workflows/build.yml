@@ -111,10 +111,13 @@ jobs:
           engine: custom-nsis
           running-exe: 'App\QBZDownloader\QBZ Downloader.exe'
           timeout-seconds: '900'
-          package-revision: r3
+          package-revision: r4
       - name: Independently inspect installer PE and publish only if valid
         if: steps.installer.outcome == 'success'
         id: installer_validation
+        # On validation failure, publish the independently verified ZIP only,
+        # then fail the job explicitly after the publisher step.
+        continue-on-error: true
         run: |
           $target = '${{ steps.installer.outputs.installer-file }}'
           if ([string]::IsNullOrWhiteSpace($target)) { throw 'Missing installer-file output from shared action' }

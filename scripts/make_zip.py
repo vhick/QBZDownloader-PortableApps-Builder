@@ -7,7 +7,7 @@ import zipfile
 
 stage=Path('work/stage/QBZDownloaderPortable')
 identity=json.loads((stage/'Other/Source/build-identity.json').read_text(encoding='utf-8'))
-name=f"QBZDownloaderPortable-{identity['version']}-{identity['upstream_commit'][:12]}-b1r3.zip"
+name=f"QBZDownloaderPortable-{identity['version']}-{identity['upstream_commit'][:12]}-b1r4.zip"
 dest=Path('out/release')/name
 dest.parent.mkdir(parents=True,exist_ok=True)
 if dest.exists():raise RuntimeError('Refusing to overwrite existing ZIP')

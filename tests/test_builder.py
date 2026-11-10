@@ -9,6 +9,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from patch_upstream import patch,MARKER
 from resolve_upstream import VERSION,FULL_SHA
 from build_application import ensure_packaged_sqlite, native_addon_path, sqlite_native_layout, snapshot_sqlite_module
+from validate_package import pe_info
+from validate_installer import validate_installer
 
 class BuilderTests(unittest.TestCase):
     def test_numeric_stable_version_validation(self):
@@ -111,6 +113,56 @@ class BuilderTests(unittest.TestCase):
             native.write_bytes(b)
             with self.assertRaisesRegex(RuntimeError, 'differs from verified'):
                 ensure_packaged_sqlite(snap,packed)
+
+    def test_x86_nsis_stub_is_valid_but_x86_app_is_not(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            stub = base/'QBZDownloaderPortable_5.6.3.0_custom-nsis-r4.paf.exe'
+            self.make_pe(stub, 0x014c, size=1024*1024+128)
+            with self.assertRaisesRegex(ValueError, '0x14c'):
+                pe_info(stub)  # App/launcher validator remains x64-only.
+            copied = validate_installer(stub, base/'release')
+            self.assertEqual(copied.read_bytes(), stub.read_bytes())
+            self.assertEqual(pe_info(copied, allowed_machines=(0x014c,)), 0x014c)
+
+    def test_x64_app_accepted_but_x64_nsis_stub_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            exe = base/'QBZDownloaderPortable_5.6.3.0_custom-nsis-r4.paf.exe'
+            self.make_pe(exe, 0x8664, size=1024*1024+128)
+            self.assertEqual(pe_info(exe), 0x8664)
+            with self.assertRaisesRegex(ValueError, '0x8664'):
+                validate_installer(exe, base/'release')
+            self.assertFalse((base/'release'/exe.name).exists())
+
+    def test_invalid_machine_or_non_pe_installer_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            exe = base/'QBZDownloaderPortable_5.6.3.0_custom-nsis-r4.paf.exe'
+            self.make_pe(exe, 0xaa64, size=1024*1024+128)  # ARM64
+            with self.assertRaisesRegex(ValueError, '0xaa64'):
+                validate_installer(exe, base/'release')
+            exe.write_bytes(b'not-a-pe'+b'\x00'*(1024*1024+128))
+            with self.assertRaisesRegex(ValueError, 'Not a PE'):
+                validate_installer(exe, base/'release')
+
+    def test_installer_validation_failure_keeps_zip_publication_path(self):
+        root=Path(__file__).resolve().parents[1]
+        workflow=(root/'.github/workflows/build.yml').read_text(encoding='utf-8')
+        step=workflow.split('      - name: Independently inspect installer PE',1)[1].split('      - name:',1)[0]
+        self.assertIn('continue-on-error: true',step)
+        self.assertIn("steps.installer_validation.outcome != 'success'",workflow)
+        self.assertIn("$tag += '-zip-only'",workflow)
+
+    @staticmethod
+    def make_pe(path, machine, *, size):
+        path=Path(path)
+        with path.open('wb') as f:
+            f.truncate(size)
+        with path.open('r+b') as f:
+            f.write(b'MZ')
+            f.seek(0x3c); f.write(struct.pack('<I', 128))
+            f.seek(128); f.write(b'PE\x00\x00'); f.write(struct.pack('<H', machine))
 
     def test_anchor_drift_is_fatal(self):
         with self.assertRaises(RuntimeError):patch('const fs = require(\'fs\');\n')

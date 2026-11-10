@@ -1,4 +1,4 @@
-# QBZ PortableApps builder b1r3 troubleshooting
+# QBZ PortableApps builder b1r4 troubleshooting
 
 **NO STABLE UPSTREAM TAGS FOUND** — This is an intentional source-provenance stop. Upstream GitHub currently appears to have no published Releases. Check whether stable Git tags exist. If none, explicitly select the build workflow's **allow_unreleased_snapshot=true** to pin the currently published GitHub HEAD commit, or supply a full 40-character reviewed upstream commit SHA with its exact package version. The HEAD option is an *unreleased snapshot*, not an official stable release.
 
@@ -33,3 +33,13 @@
 **Headless SQLite probe fails after ASAR removal** — Read the exception from `HEADLESS ELECTRON SQLITE ABI TEST`; do not assume a static `.node` file is enough. Inspect whether the source lockfile uses a native module incompatible with bundled Electron, whether a supporting runtime `.dll` is missing, and whether `bindings` and `file-uri-to-path` production dependencies are included. The probe deliberately fails closed and does not copy arbitrary global Node modules.
 
 **b1r2 `Missing/implausibly small native SQLite addon` (uploaded run `115934299115`)** — This is the obsolete legacy `build/Release/better_sqlite3.node` assumption. The actual better-sqlite3 13 loader checks `prebuilds/win32-x64.node` first. b1r3 checks the version-specific native loader, validates x64 PE and module identity before/after Electron packaging, protects a source module snapshot against packager side effects, and requires a headless SQLite query. Do not disable this runtime check.
+
+**b1r3 `Expected Windows x64 PE, found 0x14c` after a successful NSIS compile
+(log `115941741728`)** — The installed QBZ application and root launcher must
+be Windows x64, but the pinned custom NSIS builder emits an x86-unicode
+bootstrap EXE. `0x014c` means x86, and is normal for this NSIS stub. b1r4
+uses a narrow x86-only allowlist for the installer and retains x64-only
+validation for all app binaries. Do not rename or convert the compiled
+installer to 64-bit. b1r4 also preserves/publishes the validated ZIP as
+ZIP-only if an installer validation fails; this separate fallback is not a
+claim that installation was tested.

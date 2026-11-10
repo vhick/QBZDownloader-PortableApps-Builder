@@ -1,4 +1,4 @@
-# QBZ Downloader — Windows PortableApps Builder Kit b1r3
+# QBZ Downloader — Windows PortableApps Builder Kit b1r4
 
 **Mode: PORTABLEAPPS only.** This is an independent, unofficial builder for [ifauzeee/QBZ-Downloader](https://github.com/ifauzeee/QBZ-Downloader). It creates a source-built Windows x64 Electron application, a genuine compiled C++ root `QBZDownloaderPortable.exe`, a ready-to-extract PortableApps ZIP, and a separate community NSIS `.paf.exe` installer built through the pinned shared action. **No installation is required to run the ZIP.** This kit is **not** a PortableApps.com-certified package.
 
@@ -9,7 +9,7 @@
 1. Sign in at [github.com](https://github.com). Select **New repository**. Use a new name such as `QBZDownloader-PortableApps-Builder`. **Do not fork QBZ-Downloader.** Choose **Private** if you want your generated releases restricted to your account; choose Public only if you intend public distribution and license obligations are met. Create the empty repository.
 2. In **GitHub Desktop**, select **File > Clone Repository**, choose your new repository, and clone it to a local folder.
 3. Extract every file from this builder-kit ZIP into the clone root, including the **`.github`** folder. It must look like `.github/workflows/build.yml`, `scripts/resolve_upstream.py`, `launcher/main.cpp`, and `README.md`.
-4. In GitHub Desktop, review changed files, enter a summary such as `Add QBZ Downloader PortableApps builder b1r3`, and click **Commit to main** then **Push origin**. No manual Git initialization or upstream fork required.
+4. In GitHub Desktop, review changed files, enter a summary such as `Add QBZ Downloader PortableApps builder b1r4`, and click **Commit to main** then **Push origin**. No manual Git initialization or upstream fork required.
 5. On the repository's GitHub website, select **Actions**. Enable actions when prompted. Select **QBZ Downloader - Build PortableApps ZIP and Installer**, then **Run workflow**.
 6. Leave `upstream_version=latest` and `upstream_commit` empty for a tagged stable release. **Important:** the public upstream Releases page currently lists no downloadable releases, and a corresponding stable tag has not been confirmed. If the log says `NO STABLE UPSTREAM TAGS FOUND`, re-run with **allow_unreleased_snapshot=true**. This is a deliberate opt-in to a specifically recorded upstream commit, **not** a verified official stable release. Or provide an independently verified 40-character upstream SHA together with its matching package version. Never use a random SHA.
 7. Leave `publish=true` to create release assets in **your builder repository**. The job obtains code, builds QBZ, prepares portable folders, compiles the launcher, tests the layout, creates the ZIP, invokes the pinned installer builder, and publishes through the pinned publisher. It does not need a Windows desktop session, local Node.js, manual downloads, elevation, or a personal access token.
@@ -21,9 +21,9 @@
 
 Expected naming is based on the actual source version and first 12 source-SHA characters, not the shared publisher version:
 
-- ZIP: `QBZDownloaderPortable-<upstream-version>-<source-sha12>-b1r3.zip`
-- Community installer: `QBZDownloaderPortable_<package-version-four-components>_custom-nsis-r3.paf.exe` (final name is supplied by the pinned package-builder action).
-- Release tag: `portable-qbz-v<version>-<sha12>-b1r3`; a ZIP-only release from a failed installer ends in `-zip-only`.
+- ZIP: `QBZDownloaderPortable-<upstream-version>-<source-sha12>-b1r4.zip`
+- Community installer: `QBZDownloaderPortable_<package-version-four-components>_custom-nsis-r4.paf.exe` (final name is supplied by the pinned package-builder action).
+- Release tag: `portable-qbz-v<version>-<sha12>-b1r4`; a ZIP-only release from a failed installer ends in `-zip-only`.
 - ZIP contains `Other/Source/build-identity.json`, the upstream version, exact commit, lockfile SHA-256 values, builder revision, source provenance and retained upstream MIT license.
 - Shared publisher creates `SHA256SUMS.txt` in the release automatically. It publishes only validated `.zip` and `.paf.exe` assets. Default pruning is **off**.
 
@@ -81,7 +81,7 @@ A successful ZIP validation can be followed by a failed installer action. In tha
 1. Select **QBZ Downloader - Package Installer from Validated Release ZIP** in Actions.
 2. Enter the exact earlier `portable-qbz-...-zip-only` release tag.
 3. This workflow verifies the release's publisher-managed marker and published checksum, safely extracts the previously validated ZIP, and runs only the pinned shared installer action.
-4. On success, it publishes the verified ZIP and new `.paf.exe` under a `...-pack-r3` tag. No upstream recompilation is performed.
+4. On success, it publishes the verified ZIP and new `.paf.exe` under a `...-pack-r4` tag. No upstream recompilation is performed.
 
 ## Verified integration boundaries
 
@@ -107,3 +107,24 @@ that module if the packager omits it, and tests a real SQLite query using the
 packaged Electron runtime before publishing. Older SQLite module versions
 retain the `build/Release/` path. Changes have been locally regression-tested,
 not Windows-compiled in this environment.
+
+## b1r4 fix (Windows log `115941741728`)
+
+The b1r3 run **WINDOWS-COMPILED** Electron 44.10.0, the x64 C++ launcher,
+and a source-pinned `better-sqlite3` module. Its headless Electron SQLite ABI
+probe, stage verification and full ZIP verification passed. The pinned shared
+installer action also generated an approximately 205 MB installer EXE.
+However, the builder's *independent installer validator* reused the strict
+x64 PE check intended for application executables. The custom NSIS installer
+has the expected **x86-unicode stub (PE machine `0x014c`)**, while the bundled
+application remains x64 (`0x8664`). The b1r3 validation therefore rejected
+an otherwise plausible installer. This does NOT prove the installer installs
+or upgrades properly on an interactive Windows desktop.
+
+**b1r4 changes:** the custom NSIS installer has a dedicated x86 PE check,
+while app, launcher and native dependency checks remain x64-only. Four
+regression tests cover both architectures, malformed EXEs, and ZIP-only
+fallback behavior. Installer-validation failure now allows the independently
+validated ZIP to be published under `-zip-only` before the run reports failure.
+There is no upstream application-source change beyond the new builder revision
+identity, and no change to either pinned shared action version.

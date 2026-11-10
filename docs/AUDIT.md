@@ -1,4 +1,4 @@
-# QBZ Downloader b1r3 — source and portability findings
+# QBZ Downloader b1r4 — source and portability findings
 
 **Audit date:** 2026-11-10. **Resolved architecture:** PORTABLEAPPS (on-demand Electron downloader with local web dashboard/backend, Windows x64). **Selected deliverable:** ZIP + independently generated community NSIS installer. NATIVE not requested and not built.
 
@@ -93,3 +93,25 @@ Launcher source: `launcher/main.cpp` and `launcher/CMakeLists.txt`. Windows PE c
 - **WINDOWS-COMPILED (b1r2):** npm source dependency install, backend/React build, native rebuild command, Electron 44.10.0 packaging successfully completed. The build stopped before root launcher compilation and ZIP validation.
 - **FAILED (b1r2):** hard-coded `node_modules/better-sqlite3/build/Release/better_sqlite3.node` absent. The lockfile-selected better-sqlite3 v13.x ships `prebuilds/win32-x64.node`; the upstream binding loader prefers it over legacy build/Release.
 - **b1r3 design (STATIC-VALIDATED):** select the actual version-specific JS-loader path, snapshot/validate source addon before packaging, compare target SHA-256, then run packaged Electron SQLite in-memory query. No broad cleanup or unrelated system changes. Windows b1r3 build still requires verification.
+
+## b1r3 WINDOWS-COMPILED evidence; b1r4 installer validator correction
+
+The uploaded GitHub Actions log `115941741728` establishes that the b1r3 run
+completed upstream source download, Electron 44.10.0 packaging, compiled
+portable launcher, packaged `better-sqlite3` ABI smoke test, PortableApps
+stage validation, and ZIP generation/validation. The independently built ZIP
+was named `QBZDownloaderPortable-5.6.3-25e18176ce6b-b1r3.zip` and the log
+recorded SHA-256 `92c294350ae66a3b62eed9a642213939af3bc6e0c684907df503175e340aecfa`.
+The pinned shared Package Builder generated
+`QBZDownloaderPortable_5.6.3.0_custom-nsis-r3.paf.exe`, reporting 205273407
+bytes, then the independent validator incorrectly rejected its x86 PE
+machine `0x014c` as non-x64. This matches the pinned shared action's
+`x86-unicode` NSIS output. The source-backed application and native loader
+remain x64; there is no reason to weaken their checks.
+
+b1r4 changes only the installer PE architecture allowlist to the expected
+NSIS x86 stub, retains the x64-only default for application binaries, and
+makes the independently validated ZIP eligible for `-zip-only` publication
+if installer verification fails. Regression tests cover the split. b1r4
+Windows CI, publisher invocation, and installer GUI/install/upgrade/rollback
+remain **NOT YET VERIFIED**.

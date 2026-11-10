@@ -12,8 +12,18 @@ from build_application import sqlite_native_layout
 
 ROOT='QBZDownloaderPortable'
 
-def pe_info(path):
-    with open(path,'rb') as f:
+def pe_info(path, *, allowed_machines=(0x8664,)):
+    """Check the PE signature and CPU type, not installer behavior.
+
+    Application EXEs and native SQLite/FFmpeg binaries MUST remain x64 by
+    default. The independent custom-NSIS installer validator explicitly
+    requests IMAGE_FILE_MACHINE_I386 because the verified pinned shared
+    package builder emits an x86-unicode NSIS bootstrap executable even
+    when its embedded application binaries are x64.
+    """
+    path = Path(path)
+    if not allowed_machines: raise ValueError('PE machine allowlist cannot be empty')
+    with path.open('rb') as f:
         header=f.read(64)
         if len(header)<64 or header[:2]!=b'MZ': raise ValueError(f'Not a PE: {path}')
         offset=struct.unpack_from('<I',header,0x3c)[0]
@@ -21,7 +31,10 @@ def pe_info(path):
         f.seek(offset)
         if f.read(4)!=b'PE\x00\x00': raise ValueError('Missing PE header')
         machine=struct.unpack('<H',f.read(2))[0]
-        if machine!=0x8664: raise ValueError(f'Expected Windows x64 PE, found {hex(machine)}')
+        if machine not in allowed_machines:
+            expected=', '.join(hex(x) for x in allowed_machines)
+            raise ValueError(f'Expected PE machine {expected}, found {hex(machine)}')
+        return machine
 
 def validate_stage(path):
     root=Path(path)
@@ -54,7 +67,7 @@ def validate_stage(path):
     if addon.get('native_path')!=expected_path or addon.get('module_version')!=version:
         raise ValueError('Packaged SQLite loader path/version differs from recorded native-addon identity')
     if (root/'App/QBZDownloader/resources/app.asar').exists():
-        raise ValueError('b1r3 expects verified unpacked Electron resources, not an ASAR archive')
+        raise ValueError('b1r4 expects verified unpacked Electron resources, not an ASAR archive')
     if paths[3].read_bytes()[:4]!=b'\x00\x00\x01\x00': raise ValueError('Invalid ICO')
     for icon in paths[4:6]:
         if icon.read_bytes()[:8]!=b'\x89PNG\r\n\x1a\n': raise ValueError('Invalid PNG '+str(icon))
