@@ -37,4 +37,4 @@ shutil.copy2(item,out/item.name)
 ident=json.loads((target/'QBZDownloaderPortable/Other/Source/build-identity.json').read_text(encoding='utf-8'))
 print('Verified source revision:',ident['upstream_commit'])
 with open('work/pack_identity.txt','w',encoding='utf-8') as fh:
-    fh.write(f"portable-qbz-v{ident['version']}-{ident['upstream_commit'][:12]}-b1r1-pack-r1")
+    fh.write(f"portable-qbz-v{ident['version']}-{ident['upstream_commit'][:12]}-b1r2-pack-r2")

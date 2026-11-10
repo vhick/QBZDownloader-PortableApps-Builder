@@ -1,4 +1,4 @@
-// QBZ Downloader PortableApps Launcher b1r1. MIT. Transparent, non-elevated compiled PE.
+// QBZ Downloader PortableApps Launcher b1r2. MIT. Transparent, non-elevated compiled PE.
 // No registry edits, shortcut modifications, broad host cleanup, or subprocess injection.
 #include <windows.h>
 #include <stdexcept>

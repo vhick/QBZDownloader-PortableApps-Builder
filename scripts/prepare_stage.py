@@ -47,7 +47,7 @@ CommercialUse=true
 
 [Version]
 PackageVersion={package_version}
-DisplayVersion={v} Portable b1r1
+DisplayVersion={v} Portable b1r2
 
 [Control]
 Icons=1
@@ -62,6 +62,7 @@ Start=QBZDownloaderPortable.exe
     for f in ['launcher/main.cpp','launcher/CMakeLists.txt','scripts/patch_upstream.py']:
         dest=others/f;dest.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(f,dest)
+    shutil.copy2('work/native-addon-identity.json',others/'native-addon-identity.json')
     (others/'build-identity.json').write_text(json.dumps(ident,indent=2)+'\n',encoding='utf-8')
     (ROOT/'README-PORTABLE.txt').write_text('''QBZ Downloader Portable (unofficial community build)\n\nLaunch QBZDownloaderPortable.exe, not App\\QBZDownloader\\QBZ Downloader.exe.\nData\\Electron: Electron browser profile/cache\nData\\Backend: SQLite database, keys, settings and queue history\nData\\Downloads: default audio destination for a new profile\nData\\Logs: Electron logs\n\nClose the application before moving or upgrading the folder. Preserve the entire Data directory.\nAn existing user-selected absolute download path can still point outside Data; review Settings.\nWindows-managed notifications, shell caches and machine-bound safeStorage credentials may not roam.\nNever merge with the installed QBZ Downloader profile automatically.\n''',encoding='utf-8')
     print('Staged',ROOT)

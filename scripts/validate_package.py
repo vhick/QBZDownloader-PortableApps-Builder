@@ -26,17 +26,30 @@ def validate_stage(path):
     root=Path(path)
     paths=[root/'QBZDownloaderPortable.exe',root/'App/QBZDownloader/QBZ Downloader.exe',root/'App/AppInfo/appinfo.ini',
            root/'App/AppInfo/appicon.ico',root/'App/AppInfo/appicon_16.png',root/'App/AppInfo/appicon_32.png',
-           root/'App/QBZDownloader/resources/app.asar',root/'App/QBZDownloader/resources/bin/win32-x64/ffmpeg.exe',
+           root/'App/QBZDownloader/resources/app/package.json',root/'App/QBZDownloader/resources/bin/win32-x64/ffmpeg.exe',
            root/'App/QBZDownloader/resources/bin/win32-x64/fpcalc.exe',root/'Other/Source/build-identity.json']
     for p in paths:
         if not p.is_file() or p.stat().st_size==0: raise ValueError('Missing or empty: '+str(p))
     if not (root/'Data').is_dir(): raise ValueError('Data missing')
     if any((root/'Data').rglob('*')): raise ValueError('Release stage must not contain a previous user profile')
     pe_info(paths[0]);pe_info(paths[1]);pe_info(paths[7]);pe_info(paths[8])
-    unpacked = root/'App/QBZDownloader/resources/app.asar.unpacked'
-    sqlite_nodes = list(unpacked.rglob('better_sqlite3.node')) if unpacked.is_dir() else []
-    if len(sqlite_nodes) != 1: raise ValueError('Expected one rebuilt native better_sqlite3.node under app.asar.unpacked')
-    pe_info(sqlite_nodes[0])
+    app_root=root/'App/QBZDownloader/resources/app'
+    sqlite_native=app_root/'node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+    sqlite_loader=app_root/'node_modules/better-sqlite3/lib/database.js'
+    if not sqlite_native.is_file() or not sqlite_loader.is_file():
+        raise ValueError('Missing unpacked better-sqlite3 native module or JS loader in resources/app/node_modules')
+    pe_info(sqlite_native)
+    if sqlite_native.stat().st_size < 10000: raise ValueError('SQLite native module too small')
+    addon_report=root/'Other/Source/native-addon-identity.json'
+    if not addon_report.is_file(): raise ValueError('Missing native-addon provenance report')
+    addon=json.loads(addon_report.read_text(encoding='utf-8'))
+    with sqlite_native.open('rb') as source:
+        addon_hash=hashlib.file_digest(source,'sha256').hexdigest()
+    if addon.get('native_sha256')!=addon_hash: raise ValueError('Packaged SQLite module hash differs from verified Electron probe identity')
+    if addon.get('native_path')!='resources/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node':
+        raise ValueError('Unexpected native module identity path')
+    if (root/'App/QBZDownloader/resources/app.asar').exists():
+        raise ValueError('b1r2 expects verified unpacked Electron resources, not an ASAR archive')
     if paths[3].read_bytes()[:4]!=b'\x00\x00\x01\x00': raise ValueError('Invalid ICO')
     for icon in paths[4:6]:
         if icon.read_bytes()[:8]!=b'\x89PNG\r\n\x1a\n': raise ValueError('Invalid PNG '+str(icon))

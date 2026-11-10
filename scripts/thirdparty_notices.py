@@ -6,7 +6,7 @@ from pathlib import Path
 src=Path('work/upstream')
 root=json.loads((src/'package.json').read_text(encoding='utf-8'))
 output=Path('work/stage/QBZDownloaderPortable/Other/Source/DEPENDENCY-NOTICES.txt')
-lines=['QBZ Downloader b1r1 direct runtime dependency notices',
+lines=['QBZ Downloader b1r2 direct runtime dependency notices',
        'This is not an exhaustive compliance review of transitive Electron/npm dependencies.',
        'Check the actual packaged dependencies and applicable licenses before public redistribution.','']
 for name,requested in sorted(root['dependencies'].items()):

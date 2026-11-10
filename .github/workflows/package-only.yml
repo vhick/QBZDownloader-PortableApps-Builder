@@ -61,7 +61,7 @@ jobs:
           engine: custom-nsis
           running-exe: 'App\QBZDownloader\QBZ Downloader.exe'
           timeout-seconds: '900'
-          package-revision: r1
+          package-revision: r2
       - name: Verify installer before release
         run: |
           $file = '${{ steps.installer.outputs.installer-file }}'

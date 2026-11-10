@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Windows-only source build of the real upstream Electron app, preserving lockfile provenance."""
+import hashlib
 import json
+import shutil
+import struct
 import os
 from pathlib import Path
 import subprocess
@@ -9,6 +12,92 @@ import sys
 def run(*argv,cwd=None):
     print('RUN:', ' '.join(argv),flush=True)
     subprocess.run(argv,cwd=cwd,check=True,env={**os.environ,'PYTHONIOENCODING':'utf-8'})
+
+def native_addon_path(module_root):
+    """Pin the conventional better-sqlite3 binary path; fail if upstream changes it."""
+    return Path(module_root) / 'build/Release/better_sqlite3.node'
+
+
+def inspect_pe_x64(path):
+    """Require a nonempty x64 PE DLL; no substitute files or dummy binaries."""
+    path = Path(path)
+    if not path.is_file() or path.stat().st_size < 10000:
+        raise RuntimeError(f'Missing/implausibly small native SQLite addon: {path}')
+    with path.open('rb') as f:
+        header = f.read(64)
+        if len(header) != 64 or header[:2] != b'MZ':
+            raise RuntimeError(f'SQLite addon not a Windows PE: {path}')
+        offset = struct.unpack_from('<I', header, 0x3c)[0]
+        if offset < 64 or offset + 6 > path.stat().st_size:
+            raise RuntimeError(f'Invalid SQLite addon PE offset: {path}')
+        f.seek(offset)
+        if f.read(4) != b'PE\x00\x00' or struct.unpack('<H', f.read(2))[0] != 0x8664:
+            raise RuntimeError(f'SQLite addon is not x64 PE: {path}')
+
+
+def sha256_file(path):
+    with Path(path).open('rb') as f:
+        return hashlib.file_digest(f, 'sha256').hexdigest()
+
+
+def ensure_packaged_sqlite(src, packaged):
+    """Deploy the actual Electron-ABI-rebuilt module into unpacked app resources.
+
+    electron-builder's dependency inclusion can exclude the rebuilt .node while
+    reporting success. ASAR-disabled packaging lets us verify and repair the
+    precise runtime module tree without mutating the ASAR integrity manifest.
+    """
+    src = Path(src)
+    packaged = Path(packaged)
+    source_module = src/'node_modules/better-sqlite3'
+    target_module = packaged/'resources/app/node_modules/better-sqlite3'
+    source_native = native_addon_path(source_module)
+    target_native = native_addon_path(target_module)
+    inspect_pe_x64(source_native)
+    for filename in ['package.json', 'lib/database.js']:
+        if not (source_module/filename).is_file():
+            raise RuntimeError('Source native addon JavaScript module missing: '+filename)
+    if not (target_native).is_file():
+        print('PACKAGING REPAIR: electron-builder omitted rebuilt better-sqlite3 native addon; '
+              'copying ONLY source-locked better-sqlite3 module to unpacked resources/app', flush=True)
+        shutil.copytree(source_module, target_module, dirs_exist_ok=True)
+    inspect_pe_x64(target_native)
+    if sha256_file(source_native) != sha256_file(target_native):
+        raise RuntimeError('Packaged native addon differs from verified Electron-ABI rebuilt module')
+    if not (target_module/'package.json').is_file() or not (target_module/'lib/database.js').is_file():
+        raise RuntimeError('Packaged SQLite JavaScript loader missing')
+    expected = json.loads((source_module/'package.json').read_text(encoding='utf-8'))['version']
+    actual = json.loads((target_module/'package.json').read_text(encoding='utf-8'))['version']
+    if expected != actual:
+        raise RuntimeError(f'SQLite module version mismatch: {expected} != {actual}')
+    print('PACKAGED SQLITE VERIFIED:',target_native,'version',actual,
+          'SHA256',sha256_file(target_native),flush=True)
+    return target_native
+
+
+def smoke_sqlite_under_packaged_electron(packaged):
+    """Headless Electron-ABI require/SQLite query, no GUI or persistent user profile."""
+    packaged=Path(packaged).resolve()
+    exe=packaged/'QBZ Downloader.exe'
+    app_root=packaged/'resources/app'
+    node= native_addon_path(app_root/'node_modules/better-sqlite3')
+    inspect_pe_x64(node)
+    script = (
+        "const path=require('path');"
+        "const root=process.argv[1];"
+        "const Database=require(path.join(root,'node_modules','better-sqlite3'));"
+        "const db=new Database(':memory:');"
+        "const v=db.prepare('SELECT 7 AS proof').get();"
+        "db.close();"
+        "if(v.proof!==7)process.exit(23);"
+        "console.log('ELECTRON SQLITE RUNTIME OK',process.versions.electron,process.arch);"
+    )
+    env={**os.environ, 'ELECTRON_RUN_AS_NODE':'1', 'PYTHONIOENCODING':'utf-8'}
+    print('HEADLESS ELECTRON SQLITE ABI TEST:',exe,flush=True)
+    # A packaged Electron executable can run its embedded Node runtime when
+    # ELECTRON_RUN_AS_NODE is set. Test lives entirely in memory.
+    subprocess.run([str(exe), '-e', script, str(app_root)],cwd=app_root,env=env,
+                   check=True,timeout=90)
 
 def main():
     if os.name!='nt': raise RuntimeError('Application packaging must run on Windows runner')
@@ -27,8 +116,9 @@ def main():
         'appId':'com.ifauze.qbzdownloader.portable',
         'productName':'QBZ Downloader',
         'executableName':'QBZ Downloader',
-        'asar':True,
-        'asarUnpack':['**/*.node'],
+        # v26 supports asar:false. This avoids fragile native-addon ASAR
+        # metadata and makes the Electron ABI module directly verifiable.
+        'asar':False,
         'npmRebuild':False,
         'buildDependenciesFromSource':False,
         'directories':{'output':'portable-unpacked','buildResources':'assets/desktop'},
@@ -42,6 +132,15 @@ def main():
     run('npx.cmd','--no-install','electron-builder','--win','--x64','--dir','--config',str(config_path),cwd=src)
     produced=src/'portable-unpacked/win-unpacked/QBZ Downloader.exe'
     if not produced.is_file(): raise RuntimeError('Expected unpacked QBZ Downloader.exe missing')
+    native_addon=ensure_packaged_sqlite(src, produced.parent)
+    smoke_sqlite_under_packaged_electron(produced.parent)
+    electron_version=json.loads((src/'node_modules/electron/package.json').read_text(encoding='utf-8'))['version']
+    addon_identity={'module':'better-sqlite3','electron_version':electron_version,
+                    'native_path':'resources/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+                    'native_sha256':sha256_file(native_addon),
+                    'verification':'headless Electron require + in-memory SQLite SELECT 7'}
+    Path('work/native-addon-identity.json').write_text(
+        json.dumps(addon_identity,indent=2)+'\n',encoding='utf-8')
     print('UPSTREAM WINDOWS APP PRODUCED',produced,flush=True)
 
 if __name__=='__main__': main()

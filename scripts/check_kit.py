@@ -13,4 +13,6 @@ assert 'CreateProcessW' in source and 'GetModuleFileNameW' in source
 patch=(root/'scripts/patch_upstream.py').read_text(encoding='utf-8')
 assert "'sessionData'" in patch and 'QBZ_DEFAULT_DOWNLOADS_PATH' in patch
 assert 'TraceGuard' not in source and 'ShellGuard' not in source
+build=(root/'scripts/build_application.py').read_text(encoding='utf-8')
+assert "'asar':False" in build and 'smoke_sqlite_under_packaged_electron' in build
 print('STATIC-VALIDATED: builder-kit Python parses, files, launcher design and adapter guards')

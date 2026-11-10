@@ -25,7 +25,7 @@ def run(*args, cwd=None):
 
 def gh_releases():
     token = os.getenv('GITHUB_TOKEN') or os.getenv('GH_TOKEN', '')
-    headers = {'Accept':'application/vnd.github+json','User-Agent':'QBZ-PortableApps-Builder-b1r1', 'X-GitHub-Api-Version':'2022-11-28'}
+    headers = {'Accept':'application/vnd.github+json','User-Agent':'QBZ-PortableApps-Builder-b1r2', 'X-GitHub-Api-Version':'2022-11-28'}
     if token: headers['Authorization'] = 'Bearer ' + token
     results = []
     for page in range(1, 4):
@@ -124,7 +124,7 @@ def main():
     locks = {x:hashlib.sha256((upstream/x).read_bytes()).hexdigest() for x in ('package-lock.json','client/package-lock.json')}
     identity = {'project':'QBZ-Downloader','upstream_url':URL,'version':version,'source_ref':git_ref,
                 'upstream_tag':tag,'upstream_commit':commit,'source_provenance':provenance,
-                'lockfile_sha256':locks,'builder_revision':'b1r1','package_revision':'r1','mode':'PORTABLEAPPS'}
+                'lockfile_sha256':locks,'builder_revision':'b1r2','package_revision':'r2','mode':'PORTABLEAPPS'}
     (dest/'identity.json').write_text(json.dumps(identity,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(identity,indent=2))
     output = os.getenv('GITHUB_OUTPUT')
@@ -132,6 +132,6 @@ def main():
         with open(output,'a',encoding='utf-8') as f:
             f.write(f'version={version}\ncommit={commit}\nsource_tag={tag}\n')
             # Source SHA ensures a different release for changed source under the same version.
-            f.write(f'release_tag=portable-qbz-v{version}-{commit[:12]}-b1r1\n')
+            f.write(f'release_tag=portable-qbz-v{version}-{commit[:12]}-b1r2\n')
 
 if __name__=='__main__': main()
